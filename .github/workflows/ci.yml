@@ -17,11 +17,20 @@ jobs:
 
       - name: Checkout RE-UE4SS
         shell: pwsh
+        env:
+          UE4SS_RE_PAT: ${{ secrets.UE4SS_RE_PAT }}
         run: |
+          if ([string]::IsNullOrWhiteSpace($env:UE4SS_RE_PAT)) {
+            throw "Set repository secret UE4SS_RE_PAT with read access to Re-UE4SS/UEPseudo"
+          }
+          $githubAuthUrl = "https://x-access-token:$($env:UE4SS_RE_PAT)@github.com/"
+          git config --global "url.$githubAuthUrl.insteadOf" "git@github.com:"
+          git config --global --add "url.$githubAuthUrl.insteadOf" "https://github.com/"
           git clone --depth 1 --branch v3.0.1 https://github.com/UE4SS-RE/RE-UE4SS.git external/RE-UE4SS
-          git -C external/RE-UE4SS config url."https://github.com/".insteadOf "git@github.com:"
+          git -C external/RE-UE4SS config --file .gitmodules submodule.deps/first/Unreal.url https://github.com/Re-UE4SS/UEPseudo.git
+          git -C external/RE-UE4SS config --file .gitmodules submodule.deps/first/patternsleuth.url https://github.com/trumank/patternsleuth.git
           git -C external/RE-UE4SS submodule sync --recursive
-          git -C external/RE-UE4SS submodule update --init --recursive --depth 1
+          git -C external/RE-UE4SS submodule update --init --recursive
           if (-not (Test-Path "external/RE-UE4SS/deps/first/Unreal/CMakeLists.txt")) {
             throw "RE-UE4SS deps/first/Unreal submodule was not checked out"
           }
