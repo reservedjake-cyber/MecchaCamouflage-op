@@ -46,13 +46,7 @@ C:\Program Files (x86)\Steam\steamapps\common\MECCHA CHAMELEON\
 PowerShell install:
 
 ```powershell
-$GameRoot = "C:\Program Files (x86)\Steam\steamapps\common\MECCHA CHAMELEON"
-$InstallDir = Join-Path $GameRoot "Chameleon\Binaries\Win64"
-$Release = Invoke-RestMethod "https://api.github.com/repos/acentrist/MecchaCamouflage/releases/latest"
-$ZipUrl = ($Release.assets | Where-Object { $_.name -like "*.zip" } | Select-Object -First 1).browser_download_url
-$ZipPath = Join-Path $env:TEMP "meccha-camouflage.zip"
-Invoke-WebRequest $ZipUrl -OutFile $ZipPath
-Expand-Archive -Force $ZipPath $InstallDir
+$GameRoot="C:\Program Files (x86)\Steam\steamapps\common\MECCHA CHAMELEON"; $InstallDir=Join-Path $GameRoot "Chameleon\Binaries\Win64"; $Release=Invoke-RestMethod "https://api.github.com/repos/acentrist/MecchaCamouflage/releases/latest"; $ZipUrl=($Release.assets | Where-Object { $_.name -like "*.zip" } | Select-Object -First 1).browser_download_url; $ZipPath=Join-Path $env:TEMP "meccha-camouflage.zip"; Invoke-WebRequest $ZipUrl -OutFile $ZipPath; Expand-Archive -Force $ZipPath $InstallDir
 ```
 
 Command Prompt install:
