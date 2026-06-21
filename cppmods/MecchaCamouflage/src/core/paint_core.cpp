@@ -28,9 +28,9 @@ namespace MecchaCamouflage::Core
         auto worker_count_for_items(std::size_t item_count) -> unsigned
         {
             const auto hardware = std::max(1U, std::thread::hardware_concurrency());
-            const auto useful = item_count < 65536
+            const auto useful = item_count < 4096
                                     ? 1U
-                                    : std::min<unsigned>(hardware, static_cast<unsigned>((item_count + 65535) / 65536));
+                                    : std::min<unsigned>(hardware, static_cast<unsigned>((item_count + 4095) / 4096));
             return std::max(1U, useful);
         }
 
@@ -86,6 +86,11 @@ namespace MecchaCamouflage::Core
 
             const auto center_x = static_cast<int>(std::round(clamp(u, 0.0, 1.0) * static_cast<double>(width - 1)));
             const auto center_y = static_cast<int>(std::round(clamp(v, 0.0, 1.0) * static_cast<double>(height - 1)));
+
+            const auto effective_radius = std::max(1, radius);
+            const auto radius_sq = static_cast<double>(effective_radius * effective_radius);
+            const bool point_splat = (radius <= 0);
+
             for (int dy = -radius; dy <= radius; ++dy)
             {
                 for (int dx = -radius; dx <= radius; ++dx)
@@ -97,8 +102,9 @@ namespace MecchaCamouflage::Core
                         continue;
                     }
                     const auto dist_sq = static_cast<double>(dx * dx + dy * dy);
-                    const auto radius_sq = static_cast<double>(std::max(1, radius) * std::max(1, radius));
-                    const auto local_weight = radius <= 0 ? weight : weight * clamp(1.0 - dist_sq / (radius_sq + 1.0), 0.15, 1.0);
+                    const auto local_weight = point_splat
+                        ? weight
+                        : weight * clamp(1.0 - dist_sq / (radius_sq + 1.0), 0.15, 1.0);
                     const auto index = static_cast<std::size_t>(y * width + x);
                     auto& texel = texels[index];
                     if (priority < texel.priority)
@@ -135,13 +141,12 @@ namespace MecchaCamouflage::Core
 
     auto chroma_distance_rgb(const Color& a, const Color& b) -> double
     {
-        const auto ar = a.r - (a.r + a.g + a.b) / 3.0;
-        const auto ag = a.g - (a.r + a.g + a.b) / 3.0;
-        const auto ab = a.b - (a.r + a.g + a.b) / 3.0;
-        const auto br = b.r - (b.r + b.g + b.b) / 3.0;
-        const auto bg = b.g - (b.r + b.g + b.b) / 3.0;
-        const auto bb = b.b - (b.r + b.g + b.b) / 3.0;
-        return std::sqrt((ar - br) * (ar - br) + (ag - bg) * (ag - bg) + (ab - bb) * (ab - bb));
+        const auto lum_a = (a.r + a.g + a.b) * (1.0 / 3.0);
+        const auto lum_b = (b.r + b.g + b.b) * (1.0 / 3.0);
+        const auto dr = (a.r - lum_a) - (b.r - lum_b);
+        const auto dg = (a.g - lum_a) - (b.g - lum_b);
+        const auto db = (a.b - lum_a) - (b.b - lum_b);
+        return std::sqrt(dr * dr + dg * dg + db * db);
     }
 
     auto hash_bytes(const std::vector<std::uint8_t>& bytes) -> std::uint64_t
@@ -158,16 +163,15 @@ namespace MecchaCamouflage::Core
     auto changed_byte_count(const std::vector<std::uint8_t>& before,
                             const std::vector<std::uint8_t>& after) -> int
     {
-        const auto count = std::min(before.size(), after.size());
-        int changed = 0;
-        for (std::size_t i = 0; i < count; ++i)
+        const auto common = std::min(before.size(), after.size());
+        int changed = static_cast<int>(std::max(before.size(), after.size()) - common);
+        for (std::size_t i = 0; i < common; ++i)
         {
             if (before[i] != after[i])
             {
                 ++changed;
             }
         }
-        changed += static_cast<int>(std::max(before.size(), after.size()) - count);
         return changed;
     }
 
@@ -233,10 +237,11 @@ namespace MecchaCamouflage::Core
         }
 
         constexpr int front_gap_fill_radius = 6;
+        constexpr int gap_radius_sq = front_gap_fill_radius * front_gap_fill_radius;
         auto extended_texels = texels;
         parallel_ranges(texture_pixels, [&](std::size_t begin, std::size_t end, unsigned) {
-            const auto width = std::max(1, albedo_before.width);
-            const auto height = std::max(1, albedo_before.height);
+            const int width  = std::max(1, albedo_before.width);
+            const int height = std::max(1, albedo_before.height);
             for (std::size_t index = begin; index < end; ++index)
             {
                 if (index >= texels.size() || direct_mask[index] != 0)
@@ -245,13 +250,18 @@ namespace MecchaCamouflage::Core
                 }
                 const auto y = static_cast<int>(index / static_cast<std::size_t>(width));
                 const auto x = static_cast<int>(index - static_cast<std::size_t>(y * width));
-                int best_distance_sq = front_gap_fill_radius * front_gap_fill_radius + 1;
+                int best_distance_sq = gap_radius_sq + 1;
                 int best_priority = -1;
                 std::size_t best_index = static_cast<std::size_t>(-1);
                 for (int dy = -front_gap_fill_radius; dy <= front_gap_fill_radius; ++dy)
                 {
                     const auto sy = y + dy;
                     if (sy < 0 || sy >= height)
+                    {
+                        continue;
+                    }
+                    const int dy_sq = dy * dy;
+                    if (dy_sq >= best_distance_sq)
                     {
                         continue;
                     }
@@ -262,8 +272,8 @@ namespace MecchaCamouflage::Core
                         {
                             continue;
                         }
-                        const auto distance_sq = dx * dx + dy * dy;
-                        if (distance_sq > front_gap_fill_radius * front_gap_fill_radius)
+                        const auto distance_sq = dx * dx + dy_sq;
+                        if (distance_sq > gap_radius_sq)
                         {
                             continue;
                         }
